@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProTrade Dashboard | Live Market</title>
+    <style>
+        /* Yahan wahi CSS hai jo humne finalize ki thi */
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background-color: #0b0e11; color: #eaecef; overflow: hidden; height: 100vh; }
+        nav { height: 60px; background: #181a20; border-bottom: 1px solid #2b3139; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; color: #f0b90b; }
+        .dashboard-container { display: flex; height: calc(100vh - 60px); gap: 8px; padding: 8px; }
+        #order-book { flex: 0.8; background: #1e2329; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; border: 1px solid #2b3139; }
+        .order-row { display: flex; justify-content: space-between; font-family: 'Roboto Mono', monospace; font-size: 12px; padding: 2px 0; }
+        .ask { color: #f84960; } .bid { color: #02c076; }
+        #chart-section { flex: 3; background: #1e2329; border-radius: 8px; overflow: hidden; border: 1px solid #2b3139; }
+        #trading-panel { flex: 1.2; background: #1e2329; padding: 20px; border-radius: 8px; border: 1px solid #2b3139; display: flex; flex-direction: column; overflow-y: auto; }
+        .price-info { display: flex; justify-content: space-between; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #2b3139; }
+        #live-price { font-size: 22px; font-weight: bold; }
+        label { font-size: 11px; color: #848e9c; margin-top: 10px; display: block; }
+        input[type="number"] { width: 100%; padding: 10px; margin-top: 5px; background: #2b3139; border: 1px solid #474d57; border-radius: 4px; color: white; outline: none; }
+        input#tp-price { border-left: 4px solid #0ecb81; } 
+        input#sl-price { border-left: 4px solid #f6465d; }
+        .trade-btn { width: 100%; padding: 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; margin-top: 15px; transition: 0.2s; color: white; }
+        .buy { background: #02c076; } .sell { background: #f84960; }
+        .asset-table { width: 100%; margin-top: 20px; border-collapse: collapse; font-size: 11px; }
+        .asset-table th { text-align: left; color: #848e9c; padding: 8px 0; border-bottom: 1px solid #2b3139; }
+        .asset-table td { padding: 10px 0; border-bottom: 1px solid #1e2026; }
+        .btn-close { background: #2b3139; color: #eaecef; border: 1px solid #474d57; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; }
+        .btn-close:hover { background: #f6465d; }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <strong style="font-size: 20px;">ProTrade Live</strong>
+        <span id="user-display">Balance: 10,000.00 USDT</span>
+    </nav>
+
+    <div class="dashboard-container">
+        <div id="order-book">
+            <h4 style="color: #848e9c; margin-bottom: 10px; font-size: 14px;">Order Book</h4>
+            <div id="asks"></div>
+            <div style="font-size: 18px; margin: 15px 0; text-align: center; font-weight: bold;" id="mid-price">---</div>
+            <div id="bids"></div>
+        </div>
+
+        <div id="chart-section">
+            <div id="tradingview_widget" style="height: 100%;"></div>
+        </div>
+
+        <div id="trading-panel">
+            <div class="price-info">
+                <span>BTC/USDT</span>
+                <span id="live-price">Loading...</span>
+            </div>
+            
+            <label>Amount (USDT)</label>
+            <input type="number" id="trade-amount" placeholder="0.00">
+
+            <label>Take Profit (TP Price)</label>
+            <input type="number" id="tp-price" placeholder="Target Price">
+
+            <label>Stop Loss (SL Price)</label>
+            <input type="number" id="sl-price" placeholder="Limit Loss">
+            
+            <button class="trade-btn buy" onclick="executeTrade('BUY')">BUY / LONG</button>   
+            <button class="trade-btn sell" onclick="executeTrade('SELL')">SELL / SHORT</button>
+
+            <table class="asset-table">
+                <thead>
+                    <tr>
+                        <th>Asset</th>
+                        <th>Qty</th>
+                        <th>PnL</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="position-data">
+                    <tr>
+                        <td colspan="4" style="text-align: center; color: #474d57; padding-top: 20px;">No Active Trades</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script>
+        // 1. TradingView Widget Setup
+        new TradingView.widget({
+            "autosize": true,
+            "symbol": "BINANCE:BTCUSDT",
+            "interval": "1",
+            "timezone": "Etc/UTC",
+            "theme": "dark",
+            "style": "1",
+            "locale": "en",
+            "toolbar_bg": "#f1f3f6",
+            "enable_publishing": false,
+            "hide_side_toolbar": false,
+            "allow_symbol_change": true,
+            "container_id": "tradingview_widget"
+        });
+
+        // 2. Global Variables
+        let balance = 10000.00;
+        let currentActiveTrade = null;
+        const priceElement = document.getElementById('live-price');
+        const midPriceElement = document.getElementById('mid-price');
+        const asksContainer = document.getElementById('asks');
+        const bidsContainer = document.getElementById('bids');
+        const positionData = document.getElementById('position-data');
+
+        // 3. Binance WebSocket
+        const btcSocket = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
+
+        btcSocket.onmessage = (event) => {
+            let data = JSON.parse(event.data);
+            let price = parseFloat(data.p).toFixed(2);
+            let numericPrice = parseFloat(price);
+
+            priceElement.innerText = "$" + price;
+            midPriceElement.innerText = price;
+            priceElement.style.color = data.m ? "#f84960" : "#02c076";
+
+            // Monitoring SL/TP
+            if (currentActiveTrade) {
+                checkAutoExit(numericPrice);
+            }
+
+            updateOrderBook(numericPrice);
+        };
+
+        // 4. Trade Functions
+        function executeTrade(type) {
+            const amount = document.getElementById('trade-amount').value;
+            const tp = parseFloat(document.getElementById('tp-price').value);
+            const sl = parseFloat(document.getElementById('sl-price').value);
+            
+            if(!amount || amount <= 0) return alert("Enter Amount");
+            if(type === 'BUY' && amount > balance) return alert("Low Balance");
+
+            balance -= parseFloat(amount);
+            document.getElementById('user-display').innerText = `Balance: ${balance.toFixed(2)} USDT`;
+
+            currentActiveTrade = { type, amount, tp, sl, entryPrice: parseFloat(midPriceElement.innerText) };
+
+            // UI Update: Position Table
+            positionData.innerHTML = `
+                <tr>
+                    <td>BTCUSDT</td>
+                    <td>${amount}</td>
+                    <td id="live-pnl">0.00</td>
+                    <td><button class="btn-close" onclick="stopTrade('Manual')">Close</button></td>
+                </tr>
+            `;
+        }
+
+        function checkAutoExit(price) {
+            if (currentActiveTrade.sl && price <= currentActiveTrade.sl) stopTrade("Stop Loss Hit");
+            if (currentActiveTrade.tp && price >= currentActiveTrade.tp) stopTrade("Take Profit Hit");
+        }
+
+        function stopTrade(reason) {
+            alert("Trade Closed: " + reason);
+            currentActiveTrade = null;
+            positionData.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #474d57; padding-top: 20px;">No Active Trades</td></tr>';
+        }
+
+        function updateOrderBook(basePrice) {
+            let asksHTML = ''; let bidsHTML = '';
+            for (let i = 0; i < 5; i++) {
+                let askP = (basePrice + (Math.random() * 2)).toFixed(2);
+                let bidP = (basePrice - (Math.random() * 2)).toFixed(2);
+                asksHTML += `<div class="order-row ask"><span>${askP}</span><span>${(Math.random()).toFixed(3)}</span></div>`;
+                bidsHTML += `<div class="order-row bid"><span>${bidP}</span><span>${(Math.random()).toFixed(3)}</span></div>`;
+            }
+            asksContainer.innerHTML = asksHTML; bidsContainer.innerHTML = bidsHTML;
+        }
+
+        async function placeTrade(type) {
+    // ... aapka purana trade code ...
+    const data = await response.json();
+    if (data.success) {
+        // Database se naya balance aaya, ab ise save karo
+        balance = data.newBalance; 
+        localStorage.setItem('userBalance', balance); 
+        updateUIBalance();
+        alert("Trade Saved in Database!");
+    }
+}
+    </script>
+</body>
+</html>
